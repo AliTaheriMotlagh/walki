@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>walki</title>
+  <meta name="description" content="Hold to talk. Let go to listen.">
+  <meta name="theme-color" content="#F6F4F1" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0E0D0C" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="walki">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body data-screen="join" data-state="idle">
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-mark" viewBox="0 0 100 100">
+      <g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round">
+        <path d="M64.86 36.62A20 20 0 0 1 64.86 63.38M35.14 36.62A20 20 0 0 0 35.14 63.38M72.67 29.59A30.5 30.5 0 0 1 72.67 70.41M27.33 29.59A30.5 30.5 0 0 0 27.33 70.41"/>
+      </g>
+      <circle cx="50" cy="50" r="10.5" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24">
+      <rect x="9" y="2.75" width="6" height="11.5" rx="3" fill="currentColor"/>
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v3.75" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M4 10v4M8 6.5v11M12 3.5v17M16 6.5v11M20 10v4"/>
+      </g>
+    </symbol>
+    <symbol id="i-back" viewBox="0 0 24 24">
+      <path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="i-share" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3.5v11M7.75 7.5 12 3.25l4.25 4.25"/><path d="M8 10.5H6.75a1.75 1.75 0 0 0-1.75 1.75v6.5c0 .97.78 1.75 1.75 1.75h10.5c.97 0 1.75-.78 1.75-1.75v-6.5c0-.97-.78-1.75-1.75-1.75H16"/>
+      </g>
+    </symbol>
+  </svg>
+
+  <!-- Join -->
+  <main id="join" class="screen screen-join">
+    <div class="join-inner">
+      <div class="brand">
+        <span class="brand-mark"><svg><use href="#i-mark"/></svg></span>
+        <span class="brand-word">walki</span>
+      </div>
+      <p class="tagline">Hold to talk. Let go to listen.</p>
+
+      <form id="joinForm" class="join-form" autocomplete="off" novalidate>
+        <label class="field">
+          <span class="field-label">Your name</span>
+          <input id="nameInput" name="name" maxlength="20" autocomplete="nickname" autocapitalize="words" enterkeyhint="next" placeholder="Alex">
+        </label>
+        <label class="field">
+          <span class="field-label">Channel</span>
+          <span class="field-row">
+            <span class="field-prefix">#</span>
+            <input id="channelInput" name="channel" maxlength="24" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="go" placeholder="team">
+          </span>
+        </label>
+        <p id="joinError" class="join-error" role="alert"></p>
+        <button id="joinBtn" class="btn-primary" type="submit">
+          <span class="btn-label">Join channel</span>
+          <span class="spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+    </div>
+  </main>
+
+  <!-- Radio -->
+  <main id="radio" class="screen screen-radio" aria-hidden="true">
+    <header class="topbar">
+      <button id="leaveBtn" class="icon-btn" aria-label="Leave channel"><svg><use href="#i-back"/></svg></button>
+      <div class="channel-meta">
+        <div id="channelName" class="channel-name">#team</div>
+        <div class="status"><i class="status-dot"></i><span id="statusText">Connecting…</span></div>
+      </div>
+      <button id="shareBtn" class="icon-btn" aria-label="Invite to channel"><svg><use href="#i-share"/></svg></button>
+    </header>
+
+    <section class="stage">
+      <div class="ptt-wrap" id="pttWrap">
+        <span class="halo h1"></span>
+        <span class="halo h2"></span>
+        <span class="halo h3"></span>
+        <button id="ptt" class="ptt" aria-label="Hold to talk">
+          <span class="ptt-face">
+            <svg class="ptt-icon ptt-icon-mic"><use href="#i-mic"/></svg>
+            <svg class="ptt-icon ptt-icon-wave"><use href="#i-wave"/></svg>
+          </span>
+        </button>
+      </div>
+      <div class="caption" aria-live="polite">
+        <div id="captionMain" class="caption-main">Hold to talk</div>
+        <div id="captionSub" class="caption-sub">Channel is clear</div>
+      </div>
+    </section>
+
+    <footer class="members-bar">
+      <div id="members" class="members"></div>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <label id="haptic" class="haptic" aria-hidden="true"><input type="checkbox" switch tabindex="-1"></label>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
