@@ -348,6 +348,7 @@ body.offline .status-dot {
 
 .ptt-face {
   position: absolute;
+  pointer-events: none; /* the button itself is always the touch target */
   inset: 0;
   display: grid;
   place-items: center;
@@ -371,6 +372,13 @@ body.offline .status-dot {
   transition: opacity .25s var(--ease), transform .4s var(--spring), color .25s;
 }
 .ptt-icon-wave { opacity: 0; transform: scale(.6); }
+
+/* No text selection, magnifier or callout when a held finger slides off the button */
+.screen-radio {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
 
 /* Pressed, waiting for floor */
 body[data-state="pending"] .ptt { transform: scale(.94); }

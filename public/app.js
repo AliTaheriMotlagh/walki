@@ -57,8 +57,12 @@
     queue: [], // clips waiting to play
     playing: null, // clip being played
     sending: 0,
+    held: false, // the button (or Space) is physically down
     pressing: false,
     flow: false, // a transmission is in progress (press -> recording stopped)
+    finishing: false, // recording is being stopped
+    again: false, // pressed again while finishing; start a new one after
+    floorQ: Promise.resolve(), // talk / release / clip requests, in order
     tx: false,
     txStart: 0,
     txTimer: 0,
@@ -358,6 +362,16 @@
       .finally(() => clearTimeout(timer));
   }
 
+  // Floor requests must reach the server in order: a quick second press must not
+  // be granted before the first press's release or clip lands and clears it.
+  function floorOp(action, opts) {
+    const me = S.myId;
+    const run = () => (S.myId === me && S.joined ? api(action, { method: 'POST', ...opts }) : { error: 'left' });
+    const p = S.floorQ.then(run, run);
+    S.floorQ = p.catch(() => {});
+    return p;
+  }
+
   async function poll() {
     clearTimeout(S.pollTimer);
     if (!S.joined || S.paused) return;
@@ -476,8 +490,20 @@
   // Recording starts on touch so no words are lost while the server grants the floor.
   async function press() {
     if (S.paused) return resume();
-    if (S.pressing || S.flow || !S.connected || !S.mic) return;
+    if (!S.connected || !S.mic) return;
     unlockAudio();
+    if (S.flow) {
+      // Pressed again before the last press wrapped up: carry on with the
+      // pending one, or start a fresh one as soon as it has finished.
+      if (S.finishing) S.again = true;
+      else if (!S.pressing) {
+        S.pressing = true;
+        haptic(10);
+        render();
+      }
+      return;
+    }
+    if (S.pressing) return;
     haptic(10);
     S.lastActivity = Date.now();
     if (S.playing || S.talker) return deny();
@@ -487,14 +513,15 @@
     S.mic.rec.port.postMessage(true);
     render();
 
-    const res = await api('talk', { method: 'POST' }).catch(() => ({ error: 'network' }));
+    const res = await floorOp('talk').catch(() => ({ error: 'network' }));
     if (!res.ok) {
+      S.finishing = true;
       await stopRecording();
-      S.pressing = S.flow = false;
+      S.pressing = S.flow = S.finishing = S.again = false;
       if (res.busy) {
         S.talker = res.busy;
         deny();
-      } else {
+      } else if (res.error !== 'left') {
         toast('Could not reach walki');
       }
       render();
@@ -502,13 +529,13 @@
     }
 
     S.tx = true;
+    if (!S.pressing) return finishTx(); // let go before the floor was granted
     sfx.txStart();
     haptic(18);
     S.txTimer = setTimeout(() => {
       toast('Time limit reached');
       release();
     }, MAX_TALK_MS - (Date.now() - S.txStart));
-    if (!S.pressing) finishTx(); // let go before the floor was granted
     render();
   }
 
@@ -520,29 +547,38 @@
   }
 
   async function finishTx() {
+    const audible = !!S.txTimer; // the start beep played
     clearTimeout(S.txTimer);
+    S.txTimer = 0;
     S.tx = false;
+    S.finishing = true;
     const ms = Date.now() - S.txStart;
     const pcm = await stopRecording();
-    S.flow = false;
-    sfx.txEnd();
+    S.flow = S.finishing = false;
+    if (audible) sfx.txEnd();
     render();
-    playNext();
 
-    if (!S.joined || ms < MIN_CLIP_MS || !pcm.length) {
-      api('release', { method: 'POST' }).catch(() => {});
-      return;
+    const sent = S.joined && ms >= MIN_CLIP_MS && pcm.length;
+    const retry = S.again && S.held; // let go and pressed again meanwhile
+    S.again = false;
+    if (!sent) {
+      floorOp('release').catch(() => {});
+      if (S.joined && !retry) toast(ms < MIN_CLIP_MS ? 'Hold the button to talk' : 'Microphone wasn’t ready, try again');
     }
+    if (retry) press();
+    playNext();
+    if (!sent) return;
+
     S.sending++;
     render();
     try {
       const body = encodeClip(pcm, S.ctx.sampleRate);
-      const r = await api('clip', { method: 'POST', params: { ms: String(ms) }, body, timeout: 30000 });
+      const r = await floorOp('clip', { params: { ms: String(ms) }, body, timeout: 30000 });
       if (!r.ok) throw new Error(r.error);
     } catch (err) {
       console.warn('clip', err);
-      toast('Message not sent');
-      api('release', { method: 'POST' }).catch(() => {});
+      if (S.joined) toast('Message not sent');
+      floorOp('release').catch(() => {});
     }
     S.sending--;
     render();
@@ -559,16 +595,34 @@
     if (e.animationName === 'shake') els.pttWrap.classList.remove('deny');
   });
 
-  // Pointer (touch, pen, mouse)
+  function down() {
+    S.held = true;
+    press();
+  }
+  function up() {
+    S.held = false;
+    S.again = false;
+    release();
+  }
+
+  // Pointer (touch, pen, mouse). Only the first finger counts, so a second
+  // finger landing or lifting doesn't cut the transmission.
   els.ptt.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || !e.isPrimary) return;
     e.preventDefault();
     try { els.ptt.setPointerCapture(e.pointerId); } catch {}
-    press();
+    down();
   });
-  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) els.ptt.addEventListener(ev, release);
+  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+    els.ptt.addEventListener(ev, (e) => {
+      if (!e.isPrimary) return;
+      // iOS only lets audio resume from the end of a touch.
+      if (ev === 'pointerup') unlockAudio();
+      if (S.held) up();
+    });
+  }
   els.ptt.addEventListener('contextmenu', (e) => e.preventDefault());
-  els.ptt.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+  for (const ev of ['touchstart', 'touchend']) els.ptt.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
 
   // Keyboard: hold Space (or Enter on the focused button)
   const isTyping = () => /^(INPUT|TEXTAREA)$/.test(document.activeElement && document.activeElement.tagName);
@@ -576,13 +630,13 @@
     if (body.dataset.screen !== 'radio' || isTyping() || e.repeat) return;
     if (e.code === 'Space' || (e.key === 'Enter' && document.activeElement === els.ptt)) {
       e.preventDefault();
-      press();
+      down();
     }
   });
   window.addEventListener('keyup', (e) => {
-    if (e.code === 'Space' || e.key === 'Enter') release();
+    if ((e.code === 'Space' || e.key === 'Enter') && S.held) up();
   });
-  window.addEventListener('blur', release);
+  window.addEventListener('blur', up);
 
   // -------------------------------------------------------------------------
   // Rendering
@@ -807,7 +861,7 @@
 
   function leave() {
     if (!S.joined) return;
-    release();
+    up();
     S.joined = false;
     S.paused = false;
     body.classList.remove('paused');
@@ -852,7 +906,7 @@
   }
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') return release();
+    if (document.visibilityState === 'hidden') return up();
     if (!S.joined || S.paused) return;
     keepAwake();
     if (S.ctx && S.ctx.state !== 'running') S.ctx.resume().catch(() => {});
