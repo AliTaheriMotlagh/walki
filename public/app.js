@@ -23,32 +23,45 @@
     haptic: $('haptic'),
   };
 
+  const POLL_MS = 1500;
+  const POLL_HIDDEN_MS = 4000;
+  const MAX_TALK_MS = 60_000;
+  const MIN_CLIP_MS = 350; // shorter presses are treated as accidental
+  const CLIP_RATE = 8000; // clips are 8 kHz mu-law, ~8 KB per second of speech
+
   const S = {
-    ws: null,
     myId: null,
     name: '',
     channel: '',
     joined: false,
-    iceServers: [],
+    connected: false,
+    failures: 0,
+    pollTimer: 0,
+    pollSeq: 0,
     stream: null,
     track: null,
+    mic: null, // { src, rec, mute } audio graph for the open microphone
+    chunks: [], // Float32Array chunks of the current recording
+    recDone: null,
     members: new Map(), // id -> name
-    peers: new Map(), // id -> { id, pc, audio, queue, initiator, tuned }
-    talker: null,
+    talker: null, // someone else holding the floor (recording right now)
+    heard: new Set(), // clip ids already seen
+    queue: [], // clips waiting to play
+    playing: null, // clip being played
+    sending: 0,
     pressing: false,
+    flow: false, // a transmission is in progress (press -> recording stopped)
     tx: false,
     txStart: 0,
+    txTimer: 0,
     state: 'idle',
     level: 0,
+    levelBuf: new Float32Array(512),
     raf: 0,
-    retry: 0,
-    connected: false,
-    retryTimer: 0,
-    lastSeen: 0,
-    signalChain: Promise.resolve(),
     ctx: null,
     micAnalyser: null,
-    micBuf: null,
+    rxAnalyser: null,
+    recReady: null,
     wakeLock: null,
   };
 
@@ -68,6 +81,9 @@
     const chars = parts.length > 1 ? [Array.from(parts[0])[0], Array.from(parts[1])[0]] : [Array.from(parts[0] || '?')[0]];
     return chars.join('').toUpperCase();
   };
+
+  const newId = () =>
+    crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
   let toastTimer = 0;
   function toast(text) {
@@ -152,6 +168,7 @@
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw Object.assign(new Error('insecure'), { name: 'InsecureContext' });
     }
+    if (!S.ctx || !S.ctx.audioWorklet) throw Object.assign(new Error('unsupported'), { name: 'Unsupported' });
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -161,8 +178,16 @@
       },
       video: false,
     });
+    try {
+      if (!S.recReady) S.recReady = S.ctx.audioWorklet.addModule('/recorder.js');
+      await S.recReady;
+    } catch {
+      S.recReady = null;
+      stream.getTracks().forEach((t) => t.stop());
+      throw Object.assign(new Error('unsupported'), { name: 'Unsupported' });
+    }
+
     const track = stream.getAudioTracks()[0];
-    track.enabled = false;
     if ('contentHint' in track) track.contentHint = 'speech';
     track.addEventListener('ended', () => {
       if (S.joined) {
@@ -173,21 +198,33 @@
     S.stream = stream;
     S.track = track;
 
-    if (S.ctx) {
-      try {
-        const an = S.ctx.createAnalyser();
-        an.fftSize = 512;
-        S.ctx.createMediaStreamSource(stream).connect(an);
-        S.micAnalyser = an;
-        S.micBuf = new Float32Array(an.fftSize);
-      } catch {}
-    }
+    // mic -> analyser (level meter) and -> recorder worklet -> muted output.
+    // The worklet only runs while connected towards the destination.
+    const src = S.ctx.createMediaStreamSource(stream);
+    const rec = new AudioWorkletNode(S.ctx, 'walki-rec');
+    const mute = S.ctx.createGain();
+    mute.gain.value = 0;
+    const an = S.ctx.createAnalyser();
+    an.fftSize = 512;
+    src.connect(an);
+    src.connect(rec).connect(mute).connect(S.ctx.destination);
+    rec.port.onmessage = (e) => {
+      if (e.data) S.chunks.push(e.data);
+      else if (S.recDone) S.recDone();
+    };
+    S.mic = { src, rec, mute };
+    S.micAnalyser = an;
   }
 
   function closeMic() {
+    if (S.mic) {
+      for (const node of Object.values(S.mic)) try { node.disconnect(); } catch {}
+      S.mic.rec.port.onmessage = null;
+    }
     if (S.stream) S.stream.getTracks().forEach((t) => t.stop());
     S.stream = null;
     S.track = null;
+    S.mic = null;
     S.micAnalyser = null;
   }
 
@@ -200,298 +237,295 @@
         return 'No microphone found';
       case 'InsecureContext':
         return 'Open walki over HTTPS to use the microphone';
+      case 'Unsupported':
+        return 'This browser can’t record audio. Update it or try another one';
       default:
         return 'Could not start the microphone';
     }
   }
 
   // -------------------------------------------------------------------------
-  // Signalling socket
+  // Clips: 8 kHz G.711 mu-law. Codec-free, so every browser can play every
+  // other browser's clips, and small enough for slow connections.
   // -------------------------------------------------------------------------
-  // Set by config.js when the signalling server lives on another host (e.g. app on
-  // Vercel, server on Render). Otherwise the server that served the page is used.
-  const SIGNAL_URL = window.WALKI_SIGNAL_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
-
-  const send = (msg) => S.ws && S.ws.readyState === 1 && S.ws.send(JSON.stringify(msg));
-
-  function connect() {
-    clearTimeout(S.retryTimer);
-    dropSocket(false);
-    const ws = new WebSocket(SIGNAL_URL);
-    S.ws = ws;
-    S.lastSeen = Date.now();
-    ws.onopen = () => send({ t: 'join', channel: S.channel, name: S.name });
-    ws.onmessage = (e) => {
-      S.lastSeen = Date.now();
-      let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
-      handle(msg);
-    };
-    ws.onclose = () => {
-      if (S.ws === ws) dropSocket(true);
-    };
+  function toUlaw(x) {
+    let s = Math.round(Math.max(-1, Math.min(1, x)) * 32767);
+    const sign = s < 0 ? 0x80 : 0;
+    if (sign) s = -s;
+    s = Math.min(s, 32635) + 0x84;
+    let exp = 7;
+    for (let mask = 0x4000; (s & mask) === 0 && exp > 0; exp--, mask >>= 1);
+    return ~(sign | (exp << 4) | ((s >> (exp + 3)) & 0x0f)) & 0xff;
   }
 
-  function dropSocket(reconnect) {
-    const ws = S.ws;
-    S.ws = null;
-    if (ws) {
-      ws.onclose = ws.onmessage = ws.onopen = null;
-      try { ws.close(); } catch {}
-    }
-    if (!reconnect) return;
-
-    teardownPeers();
-    S.members.clear();
-    S.myId = null;
-    if (S.tx) stopTx(false);
-    S.pressing = false;
-    S.talker = null;
-    setOffline(true);
-    render();
-    if (S.joined) {
-      const delay = Math.min(8000, 400 * 2 ** S.retry++);
-      S.retryTimer = setTimeout(connect, delay);
-    }
+  const ULAW = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const u = ~i & 0xff;
+    const s = ((((u & 0x0f) << 3) + 0x84) << ((u >> 4) & 7)) - 0x84;
+    ULAW[i] = (u & 0x80 ? -s : s) / 32768;
   }
 
-  // App-level keepalive: detects silently dead sockets (e.g. Wi-Fi -> cellular).
-  setInterval(() => {
-    if (!S.joined || !S.ws) return;
-    if (S.ws.readyState === 1) send({ t: 'ping' });
-    if (Date.now() - S.lastSeen > 25000) dropSocket(true);
-  }, 10000);
-
-  function handle(msg) {
-    switch (msg.t) {
-      case 'welcome':
-        S.retry = 0;
-        S.connected = true;
-        S.myId = msg.id;
-        S.iceServers = msg.iceServers || [];
-        setOffline(false);
-        for (const p of msg.peers) {
-          S.members.set(p.id, p.name);
-          createPeer(p.id, true);
-        }
-        setTalker(msg.talker);
-        render();
-        break;
-
-      case 'peer-join':
-        S.members.set(msg.peer.id, msg.peer.name);
-        render();
-        break;
-
-      case 'peer-leave':
-        S.members.delete(msg.id);
-        closePeer(msg.id);
-        render();
-        break;
-
-      case 'signal':
-        S.signalChain = S.signalChain.then(() => onSignal(msg.from, msg.data)).catch((e) => console.warn('signal', e));
-        break;
-
-      case 'floor':
-        setTalker(msg.talker);
-        break;
-
-      case 'busy':
-        S.pressing = false;
-        deny();
-        render();
-        break;
-
-      case 'error':
-        leave();
-        showJoinError(msg.code === 'full' ? 'That channel is full' : 'Choose a different channel name');
-        break;
+  function concat(chunks) {
+    const out = new Float32Array(chunks.reduce((n, c) => n + c.length, 0));
+    let at = 0;
+    for (const c of chunks) {
+      out.set(c, at);
+      at += c.length;
     }
+    return out;
+  }
+
+  // Box-filter downsample to 8 kHz, normalise quiet speech, encode.
+  function encodeClip(pcm, inRate) {
+    const step = inRate / CLIP_RATE;
+    const n = Math.floor(pcm.length / step);
+    const mid = new Float32Array(n);
+    let peak = 0;
+    for (let i = 0; i < n; i++) {
+      const a = Math.floor(i * step);
+      const b = Math.floor((i + 1) * step);
+      let sum = 0;
+      for (let j = a; j < b; j++) sum += pcm[j];
+      mid[i] = sum / (b - a);
+      peak = Math.max(peak, Math.abs(mid[i]));
+    }
+    const gain = peak > 0 ? Math.min(4, 0.9 / peak) : 1;
+    const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) out[i] = toUlaw(mid[i] * gain);
+    return out;
+  }
+
+  function decodeClip(bytes) {
+    const rate = S.ctx.sampleRate;
+    const len = Math.max(1, Math.floor((bytes.length * rate) / CLIP_RATE));
+    const buf = S.ctx.createBuffer(1, len, rate);
+    const out = buf.getChannelData(0);
+    const step = CLIP_RATE / rate;
+    for (let i = 0; i < len; i++) {
+      const p = i * step;
+      const j = Math.floor(p);
+      const a = ULAW[bytes[j]];
+      const b = ULAW[bytes[Math.min(bytes.length - 1, j + 1)]];
+      out[i] = a + (b - a) * (p - j);
+    }
+    return buf;
+  }
+
+  function stopRecording() {
+    return new Promise((resolve) => {
+      let timer = 0;
+      const done = () => {
+        clearTimeout(timer);
+        S.recDone = null;
+        const pcm = concat(S.chunks);
+        S.chunks = [];
+        resolve(pcm);
+      };
+      timer = setTimeout(done, 500); // the worklet can't answer while audio is suspended
+      S.recDone = done;
+      if (S.mic) S.mic.rec.port.postMessage(false);
+      else done();
+    });
   }
 
   // -------------------------------------------------------------------------
-  // WebRTC mesh
+  // Server: plain HTTPS requests, polled
   // -------------------------------------------------------------------------
-
-  // Opus tuned for speech: in-band FEC for packet loss, mono, 32 kbps fullband.
-  function tuneSdp(sdp) {
-    const m = sdp.match(/a=rtpmap:(\d+) opus\/48000/i);
-    if (!m) return sdp;
-    const pt = m[1];
-    const want = {
-      minptime: 10,
-      useinbandfec: 1,
-      usedtx: 0,
-      stereo: 0,
-      'sprop-stereo': 0,
-      maxplaybackrate: 48000,
-      maxaveragebitrate: 32000,
-    };
-    const re = new RegExp(`a=fmtp:${pt} ([^\\r\\n]*)`);
-    const merge = (existing) => {
-      const params = new Map(
-        existing.split(';').map((kv) => kv.trim().split('=')).filter(([k]) => k)
-      );
-      for (const [k, v] of Object.entries(want)) params.set(k, String(v));
-      return `a=fmtp:${pt} ${[...params].map(([k, v]) => `${k}=${v}`).join(';')}`;
-    };
-    return re.test(sdp) ? sdp.replace(re, (_, p) => merge(p)) : sdp.replace(m[0], `${m[0]}\r\n${merge('')}`);
+  function api(action, { method = 'GET', params = {}, body, timeout = 10000 } = {}) {
+    const q = new URLSearchParams({ c: S.channel, id: S.myId, name: S.name, ...params });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    return fetch(`/api/${action}?${q}`, {
+      method,
+      body,
+      cache: 'no-store',
+      signal: ctrl.signal,
+      headers: body ? { 'content-type': 'application/octet-stream' } : undefined,
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
+        if (!data) throw new Error(`HTTP ${res.status}`);
+        return data;
+      })
+      .finally(() => clearTimeout(timer));
   }
 
-  function tuneSender(peer) {
-    if (peer.tuned) return;
-    peer.tuned = true;
-    for (const sender of peer.pc.getSenders()) {
-      try {
-        const p = sender.getParameters();
-        if (!p.encodings || !p.encodings.length) continue;
-        p.encodings[0].maxBitrate = 40000;
-        p.encodings[0].priority = 'high';
-        p.encodings[0].networkPriority = 'high';
-        sender.setParameters(p).catch(() => {});
-      } catch {}
-    }
-  }
-
-  function createPeer(id, initiator) {
-    closePeer(id);
-    const pc = new RTCPeerConnection({ iceServers: S.iceServers, bundlePolicy: 'max-bundle', rtcpMuxPolicy: 'require' });
-    const peer = { id, pc, audio: null, queue: [], initiator, tuned: false };
-    S.peers.set(id, peer);
-
-    pc.addTrack(S.track, S.stream);
-    pc.onicecandidate = (e) => e.candidate && send({ t: 'signal', to: id, data: { candidate: e.candidate } });
-    pc.ontrack = (e) => attachAudio(peer, e.streams[0] || new MediaStream([e.track]));
-    pc.onconnectionstatechange = () => {
-      const st = pc.connectionState;
-      if (st === 'connected') tuneSender(peer);
-      if (st === 'failed' && peer.initiator) makeOffer(peer, true);
-      renderMembers();
-    };
-
-    if (initiator) makeOffer(peer);
-    return peer;
-  }
-
-  async function makeOffer(peer, iceRestart = false) {
+  async function poll() {
+    clearTimeout(S.pollTimer);
+    if (!S.joined) return;
+    const seq = ++S.pollSeq;
     try {
-      const offer = await peer.pc.createOffer({ iceRestart });
-      offer.sdp = tuneSdp(offer.sdp);
-      await peer.pc.setLocalDescription(offer);
-      send({ t: 'signal', to: peer.id, data: { sdp: peer.pc.localDescription } });
-    } catch (e) {
-      console.warn('offer', e);
-    }
-  }
-
-  async function onSignal(from, data) {
-    let peer = S.peers.get(from);
-    if (data.sdp) {
-      if (data.sdp.type === 'offer') {
-        if (!peer) peer = createPeer(from, false);
-        await peer.pc.setRemoteDescription(data.sdp);
-        const answer = await peer.pc.createAnswer();
-        answer.sdp = tuneSdp(answer.sdp);
-        await peer.pc.setLocalDescription(answer);
-        send({ t: 'signal', to: from, data: { sdp: peer.pc.localDescription } });
-      } else if (peer) {
-        await peer.pc.setRemoteDescription(data.sdp);
+      const r = await api('poll');
+      if (!S.joined || seq !== S.pollSeq) return;
+      if (r.error === 'full' || r.error === 'storage') {
+        leave();
+        return showJoinError(r.error === 'full' ? 'That channel is full' : 'walki’s server storage isn’t set up yet');
       }
-      if (peer) for (const c of peer.queue.splice(0)) await peer.pc.addIceCandidate(c).catch(() => {});
-    } else if (data.candidate && peer) {
-      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(data.candidate).catch(() => {});
-      else peer.queue.push(data.candidate);
+      if (r.error) throw new Error(r.error);
+      onState(r);
+    } catch (err) {
+      if (!S.joined || seq !== S.pollSeq) return;
+      console.warn('poll', err);
+      if (++S.failures >= 2) setOffline(true);
+      render();
     }
+    S.pollTimer = setTimeout(poll, document.visibilityState === 'visible' ? POLL_MS : POLL_HIDDEN_MS);
   }
 
-  function attachAudio(peer, stream) {
-    if (!peer.audio) {
-      const a = document.createElement('audio');
-      a.autoplay = true;
-      a.playsInline = true;
-      a.setAttribute('playsinline', '');
-      a.hidden = true;
-      body.appendChild(a);
-      peer.audio = a;
+  function onState(r) {
+    const first = !S.connected;
+    S.connected = true;
+    S.failures = 0;
+    setOffline(false);
+
+    S.members = new Map(r.members.map((m) => [m.id, m.name]));
+    if (!S.flow) S.talker = r.talker && r.talker !== S.myId ? r.talker : null;
+
+    // Play clips that arrived since the last poll; on joining, skip the backlog.
+    for (const clip of r.clips) {
+      if (first || S.heard.has(clip.k) || clip.from === S.myId) continue;
+      enqueue(clip);
     }
-    peer.audio.srcObject = stream;
-    peer.audio.muted = S.talker !== peer.id;
-    peer.audio.play().catch(() => {});
+    S.heard = new Set(r.clips.map((c) => c.k));
+    render();
   }
 
-  function closePeer(id) {
-    const peer = S.peers.get(id);
-    if (!peer) return;
-    S.peers.delete(id);
-    peer.pc.onicecandidate = peer.pc.ontrack = peer.pc.onconnectionstatechange = null;
-    try { peer.pc.close(); } catch {}
-    if (peer.audio) {
-      peer.audio.srcObject = null;
-      peer.audio.remove();
-    }
+  function sendLeave() {
+    const url = `/api/leave?${new URLSearchParams({ c: S.channel, id: S.myId })}`;
+    if (!(navigator.sendBeacon && navigator.sendBeacon(url))) fetch(url, { method: 'POST', keepalive: true }).catch(() => {});
   }
 
-  function teardownPeers() {
-    for (const id of [...S.peers.keys()]) closePeer(id);
+  // -------------------------------------------------------------------------
+  // Playback queue
+  // -------------------------------------------------------------------------
+  function enqueue(clip) {
+    clip.data = fetch(`/api/clip?${new URLSearchParams({ c: S.channel, k: clip.k })}`)
+      .then((res) => (res.ok ? res.arrayBuffer() : null))
+      .catch(() => null);
+    S.queue.push(clip);
+    playNext();
+  }
+
+  async function playNext() {
+    if (S.playing || S.flow || !S.queue.length || !S.ctx) return;
+    const clip = S.queue.shift();
+    S.playing = clip;
+    render();
+    const data = await clip.data;
+    if (S.playing !== clip) return; // left or stopped meanwhile
+    if (!data || !data.byteLength) {
+      S.playing = null;
+      render();
+      return playNext();
+    }
+
+    if (S.ctx.state !== 'running') S.ctx.resume().catch(() => {});
+    const src = S.ctx.createBufferSource();
+    src.buffer = decodeClip(new Uint8Array(data));
+    const an = S.ctx.createAnalyser();
+    an.fftSize = 512;
+    src.connect(an).connect(S.ctx.destination);
+    clip.src = src;
+    S.rxAnalyser = an;
+    src.onended = () => {
+      if (S.playing !== clip) return;
+      S.playing = null;
+      S.rxAnalyser = null;
+      sfx.rxEnd();
+      render();
+      playNext();
+    };
+    sfx.rxStart();
+    src.start(S.ctx.currentTime + 0.08);
+    render();
+  }
+
+  function stopPlayback() {
+    const clip = S.playing;
+    S.playing = null;
+    S.queue = [];
+    S.rxAnalyser = null;
+    if (clip && clip.src) {
+      clip.src.onended = null;
+      try { clip.src.stop(); } catch {}
+    }
   }
 
   // -------------------------------------------------------------------------
   // Push-to-talk / floor control
   // -------------------------------------------------------------------------
-  function setTalker(id) {
-    const prev = S.talker;
-    S.talker = id || null;
 
-    for (const p of S.peers.values()) if (p.audio) p.audio.muted = p.id !== S.talker;
-
-    if (S.talker && S.talker === S.myId) {
-      if (S.pressing && !S.tx) startTx();
-      else if (!S.pressing) send({ t: 'release' });
-    } else if (S.tx) {
-      stopTx(false);
-      S.pressing = false;
-      toast('Time limit reached');
-    }
-
-    if (prev !== S.talker) {
-      if (S.talker && S.talker !== S.myId) sfx.rxStart();
-      else if (prev && prev !== S.myId) sfx.rxEnd();
-    }
-    render();
-  }
-
-  function press() {
-    if (S.pressing || !S.myId || !S.track) return;
+  // Recording starts on touch so no words are lost while the server grants the floor.
+  async function press() {
+    if (S.pressing || S.flow || !S.connected || !S.mic) return;
     unlockAudio();
     haptic(10);
-    if (S.talker && S.talker !== S.myId) return deny();
-    S.pressing = true;
-    send({ t: 'talk' });
+    if (S.playing || S.talker) return deny();
+    S.pressing = S.flow = true;
+    S.chunks = [];
+    S.txStart = Date.now();
+    S.mic.rec.port.postMessage(true);
+    render();
+
+    const res = await api('talk', { method: 'POST' }).catch(() => ({ error: 'network' }));
+    if (!res.ok) {
+      await stopRecording();
+      S.pressing = S.flow = false;
+      if (res.busy) {
+        S.talker = res.busy;
+        deny();
+      } else {
+        toast('Could not reach walki');
+      }
+      render();
+      return playNext();
+    }
+
+    S.tx = true;
+    sfx.txStart();
+    haptic(18);
+    S.txTimer = setTimeout(() => {
+      toast('Time limit reached');
+      release();
+    }, MAX_TALK_MS - (Date.now() - S.txStart));
+    if (!S.pressing) finishTx(); // let go before the floor was granted
     render();
   }
 
   function release() {
     if (!S.pressing) return;
     S.pressing = false;
-    if (S.tx) stopTx(true);
-    else send({ t: 'release' });
+    if (S.tx) finishTx();
     render();
   }
 
-  function startTx() {
-    S.tx = true;
-    S.txStart = Date.now();
-    S.track.enabled = true;
-    sfx.txStart();
-    haptic(18);
-  }
-
-  function stopTx(notify) {
+  async function finishTx() {
+    clearTimeout(S.txTimer);
     S.tx = false;
-    if (S.track) S.track.enabled = false;
+    const ms = Date.now() - S.txStart;
+    const pcm = await stopRecording();
+    S.flow = false;
     sfx.txEnd();
-    if (notify) send({ t: 'release' });
+    render();
+    playNext();
+
+    if (!S.joined || ms < MIN_CLIP_MS || !pcm.length) {
+      api('release', { method: 'POST' }).catch(() => {});
+      return;
+    }
+    S.sending++;
+    render();
+    try {
+      const body = encodeClip(pcm, S.ctx.sampleRate);
+      const r = await api('clip', { method: 'POST', params: { ms: String(ms) }, body, timeout: 30000 });
+      if (!r.ok) throw new Error(r.error);
+    } catch (err) {
+      console.warn('clip', err);
+      toast('Message not sent');
+      api('release', { method: 'POST' }).catch(() => {});
+    }
+    S.sending--;
+    render();
   }
 
   function deny() {
@@ -536,10 +570,9 @@
   const memberEls = new Map();
 
   function renderMembers() {
-    const list = [{ key: 'self', name: S.name, me: true, talking: S.tx, linked: true }];
+    const list = [{ key: 'self', name: S.name, me: true, talking: S.tx }];
     for (const [id, name] of S.members) {
-      const pc = S.peers.get(id);
-      list.push({ key: id, name, me: false, talking: S.talker === id, linked: pc && pc.pc.connectionState === 'connected' });
+      list.push({ key: id, name, me: false, talking: S.talker === id || (S.playing && S.playing.from === id) });
     }
 
     const seen = new Set();
@@ -557,7 +590,6 @@
       el.querySelector('.member-name').textContent = m.me ? 'You' : m.name;
       el.classList.toggle('me', m.me);
       el.classList.toggle('talking', !!m.talking);
-      el.style.opacity = m.linked ? '' : '.45';
       el.title = m.name;
     }
     for (const [key, el] of memberEls) {
@@ -587,8 +619,8 @@
     const offline = body.classList.contains('offline');
     let state = 'idle';
     if (S.tx) state = 'tx';
-    else if (S.talker && S.talker !== S.myId) state = 'rx';
     else if (S.pressing) state = 'pending';
+    else if (S.playing || S.talker) state = 'rx';
     S.state = state;
     body.dataset.state = state;
     els.pttWrap.classList.toggle('rx-tone', state === 'rx');
@@ -599,8 +631,10 @@
       setCaption('Hold to talk', 'Waiting for connection');
     } else {
       els.statusText.textContent = others ? `${others + 1} on channel` : 'Only you here';
-      if (state === 'tx') setCaption('Talking', `Release to listen · ${fmtTime(Date.now() - S.txStart)}`);
-      else if (state === 'rx') setCaption(S.members.get(S.talker) || 'Someone', 'is talking');
+      if (state === 'tx') setCaption('Talking', `Release to send · ${fmtTime(Date.now() - S.txStart)}`);
+      else if (state === 'rx' && S.playing) setCaption(S.playing.name, 'is talking');
+      else if (state === 'rx') setCaption(S.members.get(S.talker) || 'Someone', 'is talking · plays when they let go');
+      else if (S.sending) setCaption('Hold to talk', 'Sending…');
       else setCaption('Hold to talk', others ? 'Channel is clear' : 'Invite someone to start talking');
     }
     els.ptt.setAttribute('aria-pressed', String(state === 'tx'));
@@ -619,22 +653,20 @@
       els.pttWrap.style.setProperty('--level', '0');
       return;
     }
+    const an = S.state === 'tx' ? S.micAnalyser : S.rxAnalyser;
     let raw = 0;
-    if (S.state === 'tx' && S.micAnalyser) {
-      S.micAnalyser.getFloatTimeDomainData(S.micBuf);
+    if (an) {
+      an.getFloatTimeDomainData(S.levelBuf);
       let sum = 0;
-      for (let i = 0; i < S.micBuf.length; i++) sum += S.micBuf[i] * S.micBuf[i];
-      raw = Math.sqrt(sum / S.micBuf.length);
+      for (let i = 0; i < S.levelBuf.length; i++) sum += S.levelBuf[i] * S.levelBuf[i];
+      raw = Math.sqrt(sum / S.levelBuf.length);
+    }
+    if (S.state === 'tx') {
       const sec = Math.floor((Date.now() - S.txStart) / 1000);
       if (sec !== lastSecond) {
         lastSecond = sec;
-        els.captionSub.textContent = `Release to listen · ${fmtTime(Date.now() - S.txStart)}`;
+        els.captionSub.textContent = `Release to send · ${fmtTime(Date.now() - S.txStart)}`;
       }
-    } else if (S.state === 'rx') {
-      const peer = S.peers.get(S.talker);
-      const rec = peer && peer.pc.getReceivers()[0];
-      const src = rec && rec.getSynchronizationSources && rec.getSynchronizationSources()[0];
-      raw = (src && src.audioLevel) || 0;
     }
     const target = Math.min(1, Math.sqrt(raw) * 1.6);
     S.level += (target - S.level) * (target > S.level ? 0.45 : 0.12);
@@ -689,11 +721,13 @@
     }
     setLoading(false);
 
+    S.myId = newId();
     S.name = name;
     S.channel = channel;
     S.joined = true;
-    S.retry = 0;
     S.connected = false;
+    S.failures = 0;
+    S.heard = new Set();
     store.set('walki:name', name);
     store.set('walki:channel', channel);
     history.replaceState(null, '', `/?c=${encodeURIComponent(channel)}`);
@@ -703,21 +737,20 @@
     render();
     showScreen('radio');
     keepAwake();
-    connect();
+    poll();
   });
 
   function leave() {
     if (!S.joined) return;
     release();
     S.joined = false;
-    clearTimeout(S.retryTimer);
-    send({ t: 'leave' });
-    dropSocket(false);
-    teardownPeers();
+    S.pollSeq++;
+    clearTimeout(S.pollTimer);
+    sendLeave();
+    stopPlayback();
     S.members.clear();
-    S.myId = null;
     S.talker = null;
-    S.tx = false;
+    S.connected = false;
     closeMic();
     if (S.wakeLock) S.wakeLock.release().catch(() => {});
     setOffline(false);
@@ -756,14 +789,12 @@
     if (!S.joined) return;
     keepAwake();
     if (S.ctx && S.ctx.state !== 'running') S.ctx.resume().catch(() => {});
-    for (const p of S.peers.values()) if (p.audio) p.audio.play().catch(() => {});
-    if (!S.ws) connect();
-    else if (S.ws.readyState === 1) send({ t: 'ping' });
+    poll();
   });
 
-  window.addEventListener('online', () => {
-    if (S.joined && !S.ws) connect();
-  });
+  window.addEventListener('online', poll);
+  window.addEventListener('pagehide', () => S.joined && sendLeave());
+  window.addEventListener('pageshow', (e) => e.persisted && poll());
 
   // -------------------------------------------------------------------------
   // Boot
@@ -771,11 +802,6 @@
   const params = new URLSearchParams(location.search);
   els.nameInput.value = store.get('walki:name');
   els.channelInput.value = normalizeChannel(params.get('c') || store.get('walki:channel'));
-
-  // Wake a sleeping server (e.g. Render free plan) while the user is still typing.
-  if (window.WALKI_SIGNAL_URL) {
-    fetch(SIGNAL_URL.replace(/^ws/, 'http').replace(/\/ws$/, '/healthz'), { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
-  }
 
   if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
     navigator.serviceWorker.register('/sw.js').catch(() => {});

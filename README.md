@@ -22,52 +22,36 @@ Tap **Share** (top right) to send an invite link that opens straight into the ch
 
 ## How it works
 
+Everything runs on Vercel over plain HTTPS. There are no WebSockets and no peer-to-peer connections, so it works on networks that block Render, STUN/TURN or WebRTC.
+
 | Part | What |
 |---|---|
-| `server.js` | Serves the app + WebSocket signalling. Owns the *floor*: only one person can talk per channel (others get a busy signal), auto-release after 60 s or if the talker drops. |
-| `public/app.js` | WebRTC mesh between channel members. Opus voice (48 kHz mono, 32 kbps, in-band FEC for packet loss, echo cancellation + noise suppression). The mic track stays connected and is only *enabled* while you hold the button, so talk starts instantly. |
+| `lib/walki.js` | Channel logic: members, the *floor* (one talker per channel; others get a busy signal), voice clips. State lives in Upstash Redis; each request is a single atomic Lua script. |
+| `api/[action].js` | The Vercel function serving `/api/poll`, `/api/talk`, `/api/release`, `/api/leave`, `/api/clip`. |
+| `public/app.js` | Polls the channel every 1.5 s. Holding the button records from the mic (`public/recorder.js` worklet); letting go uploads the clip as 8 kHz mu-law (~8 KB per second of speech) and everyone else plays it. Expect about 1–2 s from release to playback. |
+| `server.js` | Local dev server: same API plus the static files, using an in-memory store when no Redis is configured. |
 | `public/styles.css` | Brand tokens, light/dark themes, all animation (GPU-only transforms/opacity). |
 
-## Deploy: Vercel (app) + Render (realtime server)
+## Deploy on Vercel
 
-Vercel serves the app but can't hold WebSocket connections, so the small signalling server (`server.js`) runs on Render.
+1. In the Vercel dashboard open the **walki** project → **Storage** → **Create Database** → **Upstash for Redis** (free plan, region *Frankfurt* to match `regions` in `vercel.json`) → connect it to the project. This sets `KV_REST_API_URL` and `KV_REST_API_TOKEN`.
+2. `vercel deploy --prod`
 
-**1. Render (server).** New → Web Service → connect this GitHub repo:
+To run locally against the same database: `vercel env pull .env.local`, then load those vars before `npm start`.
 
-| Setting | Value |
-|---|---|
-| Build command | `npm ci --omit=dev` |
-| Start command | `npm start` |
-| Health check path | `/healthz` |
-| Env `ALLOWED_ORIGINS` | `https://walki-five.vercel.app` (comma-separate more; `*` matches one subdomain label) |
-
-The free plan sleeps after 15 min idle; the app pings it as soon as it opens, but the first join can take ~30–50 s. The Starter plan stays always-on.
-
-**2. Vercel (app).** Point the app at the server and redeploy:
-
-```bash
-vercel env add WALKI_SIGNAL_URL production   # paste https://<your-service>.onrender.com
-vercel deploy --prod
-```
-
-`scripts/build-config.js` writes `public/config.js` from `WALKI_SIGNAL_URL` at build time. Left empty, the app uses its own host, so `npm start` locally or the Render URL alone also works as a complete app.
-
-### Server env vars
+### Env vars
 
 | Env var | Default | |
 |---|---|---|
-| `PORT` | `3000` | |
-| `ALLOWED_ORIGINS` | – (any) | sites allowed to open sockets |
-| `TURN_URL` | – | e.g. `turns:turn.example.com:5349` (comma-separate several) |
-| `TURN_USERNAME` / `TURN_CREDENTIAL` | – | |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | – | Upstash Redis REST (`UPSTASH_REDIS_REST_URL` / `_TOKEN` also work). Required on Vercel. |
 | `MAX_MEMBERS` | `16` | per channel |
 | `MAX_TALK_MS` | `60000` | max single transmission |
-
-**Add a TURN server for production.** About 10–20% of mobile/corporate networks block direct connections; TURN relays audio for those users. Options: [coturn](https://github.com/coturn/coturn) on a VPS, or a hosted service (Cloudflare Calls TURN, Twilio, Metered).
+| `PORT` | `3000` | local server only |
 
 Local HTTPS without a tunnel: put `key.pem` + `cert.pem` in `certs/` and the server switches to HTTPS automatically.
 
 ## Known platform limits
 
 - **Background listening:** browsers pause audio when the app is in the background or the screen locks (iOS especially). walki keeps the screen awake while a channel is open. True locked-screen listening needs a native wrapper (iOS PushToTalk framework / Android foreground service), and this codebase is ready to wrap with Capacitor.
-- Channels are designed for small teams (up to ~16). Bigger groups need an SFU media server (e.g. LiveKit) instead of the peer mesh.
+- Voice is sent after you let go (like a voice message), not streamed live.
+- Each listener polls about 2,400 times an hour. The free Vercel and Upstash plans comfortably cover a small team; heavy use needs a paid plan.

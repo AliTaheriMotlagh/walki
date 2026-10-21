@@ -9,8 +9,7 @@
     "icons": "node scripts/icons.js",
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
-  "engines": { "node": ">=18" },
-  "dependencies": {
-    "ws": "^8.18.0"
+  "engines": {
+    "node": ">=18"
   }
 }

@@ -1,9 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "echo 'no dependencies needed for the static app'",
-  "buildCommand": "node scripts/build-config.js",
+  "installCommand": "echo 'no dependencies needed'",
+  "buildCommand": "",
   "outputDirectory": "public",
+  "regions": ["fra1"],
+  "functions": {
+    "api/[action].js": { "maxDuration": 30 }
+  },
   "headers": [
     {
       "source": "/(.*)",
@@ -13,7 +17,7 @@
       ]
     },
     {
-      "source": "/(sw.js|config.js|manifest.webmanifest)",
+      "source": "/(sw.js|app.js|recorder.js|styles.css|manifest.webmanifest)",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
   ]

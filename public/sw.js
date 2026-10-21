@@ -1,6 +1,6 @@
 // App-shell cache: instant launch, always fresh when online.
-const CACHE = 'walki-v2';
-const SHELL = ['/', '/styles.css', '/app.js', '/config.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
+const CACHE = 'walki-v3';
+const SHELL = ['/', '/styles.css', '/app.js', '/recorder.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -16,7 +16,9 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const { request } = e;
-  if (request.method !== 'GET' || new URL(request.url).origin !== location.origin) return;
+  const url = new URL(request.url);
+  // API calls are live channel state: never serve them from cache.
+  if (request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
   e.respondWith(
     fetch(request)
       .then((res) => {
