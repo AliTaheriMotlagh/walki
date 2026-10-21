@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "echo 'no dependencies needed'",
-  "buildCommand": "",
+  "buildCommand": "echo 'static app, nothing to build'",
   "outputDirectory": "public",
   "regions": ["fra1"],
   "functions": {
