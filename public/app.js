@@ -42,6 +42,7 @@
     level: 0,
     raf: 0,
     retry: 0,
+    connected: false,
     retryTimer: 0,
     lastSeen: 0,
     signalChain: Promise.resolve(),
@@ -207,12 +208,16 @@
   // -------------------------------------------------------------------------
   // Signalling socket
   // -------------------------------------------------------------------------
+  // Set by config.js when the signalling server lives on another host (e.g. app on
+  // Vercel, server on Render). Otherwise the server that served the page is used.
+  const SIGNAL_URL = window.WALKI_SIGNAL_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+
   const send = (msg) => S.ws && S.ws.readyState === 1 && S.ws.send(JSON.stringify(msg));
 
   function connect() {
     clearTimeout(S.retryTimer);
     dropSocket(false);
-    const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+    const ws = new WebSocket(SIGNAL_URL);
     S.ws = ws;
     S.lastSeen = Date.now();
     ws.onopen = () => send({ t: 'join', channel: S.channel, name: S.name });
@@ -261,6 +266,7 @@
     switch (msg.t) {
       case 'welcome':
         S.retry = 0;
+        S.connected = true;
         S.myId = msg.id;
         S.iceServers = msg.iceServers || [];
         setOffline(false);
@@ -589,7 +595,7 @@
 
     const others = S.members.size;
     if (offline) {
-      els.statusText.textContent = 'Reconnecting…';
+      els.statusText.textContent = S.connected ? 'Reconnecting…' : 'Connecting…';
       setCaption('Hold to talk', 'Waiting for connection');
     } else {
       els.statusText.textContent = others ? `${others + 1} on channel` : 'Only you here';
@@ -687,6 +693,7 @@
     S.channel = channel;
     S.joined = true;
     S.retry = 0;
+    S.connected = false;
     store.set('walki:name', name);
     store.set('walki:channel', channel);
     history.replaceState(null, '', `/?c=${encodeURIComponent(channel)}`);
@@ -764,6 +771,11 @@
   const params = new URLSearchParams(location.search);
   els.nameInput.value = store.get('walki:name');
   els.channelInput.value = normalizeChannel(params.get('c') || store.get('walki:channel'));
+
+  // Wake a sleeping server (e.g. Render free plan) while the user is still typing.
+  if (window.WALKI_SIGNAL_URL) {
+    fetch(SIGNAL_URL.replace(/^ws/, 'http').replace(/\/ws$/, '/healthz'), { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+  }
 
   if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
     navigator.serviceWorker.register('/sw.js').catch(() => {});

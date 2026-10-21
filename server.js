@@ -24,6 +24,25 @@ if (process.env.TURN_URL) {
   });
 }
 
+// When the app is hosted elsewhere (e.g. Vercel), only accept sockets from those
+// origins. Comma-separated; `*` matches one subdomain label, e.g.
+// https://walki.vercel.app,https://walki-*.vercel.app
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim().replace(/\/+$/, ''))
+  .filter(Boolean)
+  .map((o) => new RegExp(`^${o.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[a-z0-9-]+')}$`, 'i'));
+
+function originAllowed(origin, host) {
+  if (!ALLOWED_ORIGINS.length || !origin) return true;
+  try {
+    if (new URL(origin).host === host) return true;
+  } catch {
+    return false;
+  }
+  return ALLOWED_ORIGINS.some((re) => re.test(origin));
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -114,7 +133,12 @@ function leave(ws) {
 
 const clean = (s, max) => String(s || '').trim().slice(0, max);
 
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  maxPayload: 64 * 1024,
+  verifyClient: ({ origin, req }) => originAllowed(origin, req.headers.host),
+});
 
 wss.on('connection', (ws) => {
   ws.id = crypto.randomUUID();

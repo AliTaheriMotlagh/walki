@@ -1,6 +1,6 @@
 // App-shell cache: instant launch, always fresh when online.
-const CACHE = 'walki-v1';
-const SHELL = ['/', '/styles.css', '/app.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
+const CACHE = 'walki-v2';
+const SHELL = ['/', '/styles.css', '/app.js', '/config.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

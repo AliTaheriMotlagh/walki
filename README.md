@@ -28,13 +28,36 @@ Tap **Share** (top right) to send an invite link that opens straight into the ch
 | `public/app.js` | WebRTC mesh between channel members. Opus voice (48 kHz mono, 32 kbps, in-band FEC for packet loss, echo cancellation + noise suppression). The mic track stays connected and is only *enabled* while you hold the button, so talk starts instantly. |
 | `public/styles.css` | Brand tokens, light/dark themes, all animation (GPU-only transforms/opacity). |
 
-## Production
+## Deploy: Vercel (app) + Render (realtime server)
 
-Deploy anywhere that runs Node with HTTPS (Render, Railway, Fly.io, a VPS behind Caddy…).
+Vercel serves the app but can't hold WebSocket connections, so the small signalling server (`server.js`) runs on Render.
+
+**1. Render (server).** New → Web Service → connect this GitHub repo:
+
+| Setting | Value |
+|---|---|
+| Build command | `npm ci --omit=dev` |
+| Start command | `npm start` |
+| Health check path | `/healthz` |
+| Env `ALLOWED_ORIGINS` | `https://walki-five.vercel.app` (comma-separate more; `*` matches one subdomain label) |
+
+The free plan sleeps after 15 min idle; the app pings it as soon as it opens, but the first join can take ~30–50 s. The Starter plan stays always-on.
+
+**2. Vercel (app).** Point the app at the server and redeploy:
+
+```bash
+vercel env add WALKI_SIGNAL_URL production   # paste https://<your-service>.onrender.com
+vercel deploy --prod
+```
+
+`scripts/build-config.js` writes `public/config.js` from `WALKI_SIGNAL_URL` at build time. Left empty, the app uses its own host, so `npm start` locally or the Render URL alone also works as a complete app.
+
+### Server env vars
 
 | Env var | Default | |
 |---|---|---|
 | `PORT` | `3000` | |
+| `ALLOWED_ORIGINS` | – (any) | sites allowed to open sockets |
 | `TURN_URL` | – | e.g. `turns:turn.example.com:5349` (comma-separate several) |
 | `TURN_USERNAME` / `TURN_CREDENTIAL` | – | |
 | `MAX_MEMBERS` | `16` | per channel |
