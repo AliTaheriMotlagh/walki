@@ -418,6 +418,10 @@ body[data-state="rx"] .h2 { animation: ripple-soft 2.4s var(--ease) infinite; }
 /* Offline */
 body.offline .ptt { opacity: .45; transform: scale(.96); pointer-events: none; }
 
+/* Paused after a long silence: the button reconnects */
+body.paused .ptt { opacity: .6; }
+body.paused .status-dot { background: var(--muted); box-shadow: none; }
+
 /* Caption ---------------------------------------------------------------- */
 .caption { text-align: center; min-height: 54px; }
 .caption-main {

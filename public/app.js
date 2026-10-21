@@ -23,8 +23,13 @@
     haptic: $('haptic'),
   };
 
-  const POLL_MS = 1500;
-  const POLL_HIDDEN_MS = 4000;
+  // Polling is the main cost on the free plans, so it slows down when the channel
+  // is quiet and stops after a long silence until the user taps to reconnect.
+  const POLL_ACTIVE_MS = 1500; // someone is talking, or was recently
+  const POLL_QUIET_MS = 3000;
+  const POLL_HIDDEN_MS = 6000;
+  const ACTIVE_WINDOW_MS = 20_000;
+  const IDLE_PAUSE_MS = 10 * 60_000;
   const MAX_TALK_MS = 60_000;
   const MIN_CLIP_MS = 350; // shorter presses are treated as accidental
   const CLIP_RATE = 8000; // clips are 8 kHz mu-law, ~8 KB per second of speech
@@ -34,6 +39,9 @@
     name: '',
     channel: '',
     joined: false,
+    paused: false,
+    resuming: false,
+    lastActivity: 0,
     connected: false,
     failures: 0,
     pollTimer: 0,
@@ -352,7 +360,7 @@
 
   async function poll() {
     clearTimeout(S.pollTimer);
-    if (!S.joined) return;
+    if (!S.joined || S.paused) return;
     const seq = ++S.pollSeq;
     try {
       const r = await api('poll');
@@ -369,7 +377,14 @@
       if (++S.failures >= 2) setOffline(true);
       render();
     }
-    S.pollTimer = setTimeout(poll, document.visibilityState === 'visible' ? POLL_MS : POLL_HIDDEN_MS);
+    if (Date.now() - S.lastActivity > IDLE_PAUSE_MS && !S.flow && !S.playing && !S.sending) return pause();
+    S.pollTimer = setTimeout(poll, nextPollDelay());
+  }
+
+  function nextPollDelay() {
+    if (document.visibilityState !== 'visible') return POLL_HIDDEN_MS;
+    const busy = S.talker || S.playing || S.flow || S.sending;
+    return busy || Date.now() - S.lastActivity < ACTIVE_WINDOW_MS ? POLL_ACTIVE_MS : POLL_QUIET_MS;
   }
 
   function onState(r) {
@@ -378,12 +393,15 @@
     S.failures = 0;
     setOffline(false);
 
+    const before = S.members.size;
     S.members = new Map(r.members.map((m) => [m.id, m.name]));
     if (!S.flow) S.talker = r.talker && r.talker !== S.myId ? r.talker : null;
+    if (S.talker || S.members.size > before) S.lastActivity = Date.now();
 
     // Play clips that arrived since the last poll; on joining, skip the backlog.
     for (const clip of r.clips) {
       if (first || S.heard.has(clip.k) || clip.from === S.myId) continue;
+      S.lastActivity = Date.now();
       enqueue(clip);
     }
     S.heard = new Set(r.clips.map((c) => c.k));
@@ -457,9 +475,11 @@
 
   // Recording starts on touch so no words are lost while the server grants the floor.
   async function press() {
+    if (S.paused) return resume();
     if (S.pressing || S.flow || !S.connected || !S.mic) return;
     unlockAudio();
     haptic(10);
+    S.lastActivity = Date.now();
     if (S.playing || S.talker) return deny();
     S.pressing = S.flow = true;
     S.chunks = [];
@@ -626,7 +646,10 @@
     els.pttWrap.classList.toggle('rx-tone', state === 'rx');
 
     const others = S.members.size;
-    if (offline) {
+    if (S.paused) {
+      els.statusText.textContent = 'Paused';
+      setCaption('Tap to reconnect', 'Paused after 10 minutes of quiet');
+    } else if (offline) {
       els.statusText.textContent = S.connected ? 'Reconnecting…' : 'Connecting…';
       setCaption('Hold to talk', 'Waiting for connection');
     } else {
@@ -725,6 +748,8 @@
     S.name = name;
     S.channel = channel;
     S.joined = true;
+    S.paused = false;
+    S.lastActivity = Date.now();
     S.connected = false;
     S.failures = 0;
     S.heard = new Set();
@@ -740,10 +765,52 @@
     poll();
   });
 
+  // Long silence: leave the channel on the server and free the mic, but stay on
+  // the radio screen so one tap brings everything back.
+  function pause() {
+    S.paused = true;
+    S.pollSeq++;
+    clearTimeout(S.pollTimer);
+    sendLeave();
+    stopPlayback();
+    S.members.clear();
+    S.talker = null;
+    S.connected = false;
+    closeMic();
+    if (S.wakeLock) S.wakeLock.release().catch(() => {});
+    setOffline(false);
+    body.classList.add('paused');
+    render();
+  }
+
+  async function resume() {
+    if (S.resuming) return;
+    S.resuming = true;
+    unlockAudio(); // inside the tap
+    try {
+      await openMic();
+    } catch (err) {
+      S.resuming = false;
+      return toast(micError(err));
+    }
+    S.resuming = false;
+    if (!S.paused) return closeMic(); // left meanwhile
+    S.paused = false;
+    S.lastActivity = Date.now();
+    S.failures = 0;
+    body.classList.remove('paused');
+    setOffline(true);
+    render();
+    keepAwake();
+    poll();
+  }
+
   function leave() {
     if (!S.joined) return;
     release();
     S.joined = false;
+    S.paused = false;
+    body.classList.remove('paused');
     S.pollSeq++;
     clearTimeout(S.pollTimer);
     sendLeave();
@@ -786,7 +853,7 @@
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') return release();
-    if (!S.joined) return;
+    if (!S.joined || S.paused) return;
     keepAwake();
     if (S.ctx && S.ctx.state !== 'running') S.ctx.resume().catch(() => {});
     poll();
