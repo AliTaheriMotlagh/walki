@@ -50,30 +50,37 @@ function shape(x, y, s) {
   return d;
 }
 
-function render(size) {
-  const raw = Buffer.alloc((size * 3 + 1) * size);
+// badge: white mark on transparent (Android status-bar notification icon).
+function render(size, badge = false) {
+  const ch = badge ? 4 : 3;
+  const raw = Buffer.alloc((size * ch + 1) * size);
   const c = size / 2;
   const SS = 4; // supersampling for smooth edges
   for (let py = 0; py < size; py++) {
-    raw[py * (size * 3 + 1)] = 0;
+    raw[py * (size * ch + 1)] = 0;
     for (let px = 0; px < size; px++) {
       let cover = 0;
       for (let sy = 0; sy < SS; sy++)
         for (let sx = 0; sx < SS; sx++) {
           const x = px + (sx + 0.5) / SS - c;
           const y = py + (sy + 0.5) / SS - c;
-          if (shape(x, y, size) <= 0) cover++;
+          if (shape(x, y, badge ? size * 1.45 : size) <= 0) cover++;
         }
       const a = cover / (SS * SS);
-      const o = py * (size * 3 + 1) + 1 + px * 3;
-      for (let i = 0; i < 3; i++) raw[o + i] = Math.round(BG[i] * (1 - a) + FG[i] * a);
+      const o = py * (size * ch + 1) + 1 + px * ch;
+      if (badge) {
+        raw[o] = raw[o + 1] = raw[o + 2] = 255;
+        raw[o + 3] = Math.round(a * 255);
+      } else {
+        for (let i = 0; i < 3; i++) raw[o + i] = Math.round(BG[i] * (1 - a) + FG[i] * a);
+      }
     }
   }
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0);
   ihdr.writeUInt32BE(size, 4);
   ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // RGB
+  ihdr[9] = badge ? 6 : 2; // RGBA : RGB
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
@@ -87,3 +94,5 @@ for (const [name, size] of [['icon-192.png', 192], ['icon-512.png', 512], ['appl
   fs.writeFileSync(path.join(OUT, name), render(size));
   console.log('wrote', name);
 }
+fs.writeFileSync(path.join(OUT, 'badge.png'), render(96, true));
+console.log('wrote badge.png');

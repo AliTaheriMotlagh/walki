@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, interactive-widget=resizes-content">
   <title>walki</title>
   <meta name="description" content="Hold to talk. Let go to listen.">
   <meta name="theme-color" content="#F6F4F1" media="(prefers-color-scheme: light)">
@@ -31,9 +31,7 @@
       <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5v3.75" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
     </symbol>
     <symbol id="i-wave" viewBox="0 0 24 24">
-      <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <path d="M4 10v4M8 6.5v11M12 3.5v17M16 6.5v11M20 10v4"/>
-      </g>
+      <g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 10v4M8 6.5v11M12 3.5v17M16 6.5v11M20 10v4"/></g>
     </symbol>
     <symbol id="i-back" viewBox="0 0 24 24">
       <path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -42,6 +40,44 @@
       <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 3.5v11M7.75 7.5 12 3.25l4.25 4.25"/><path d="M8 10.5H6.75a1.75 1.75 0 0 0-1.75 1.75v6.5c0 .97.78 1.75 1.75 1.75h10.5c.97 0 1.75-.78 1.75-1.75v-6.5c0-.97-.78-1.75-1.75-1.75H16"/>
       </g>
+    </symbol>
+    <symbol id="i-more" viewBox="0 0 24 24">
+      <g fill="currentColor"><circle cx="5.5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="18.5" cy="12" r="1.9"/></g>
+    </symbol>
+    <symbol id="i-history" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3.75 12a8.25 8.25 0 1 0 2.5-5.9"/><path d="M3.5 3.75v4h4"/><path d="M12 7.5V12l3 2"/>
+      </g>
+    </symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round">
+        <path d="M3.75 8.75c0-1.1.9-2 2-2h1.9l1.5-2.25h5.7l1.5 2.25h1.9c1.1 0 2 .9 2 2v9c0 1.1-.9 2-2 2H5.75c-1.1 0-2-.9-2-2z"/><circle cx="12" cy="13" r="3.5"/>
+      </g>
+    </symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.6v12.8c0 .8.87 1.28 1.54.85l9.9-6.4a1 1 0 0 0 0-1.7l-9.9-6.4A1 1 0 0 0 8 5.6z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><g fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></g></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15z"/><path d="M10 21a2.2 2.2 0 0 0 4 0"/></g>
+    </symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="3.75"/><path d="M12 2.75v2M12 19.25v2M2.75 12h2M19.25 12h2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M5.5 18.5l1.4-1.4M17.1 6.9l1.4-1.4"/></g>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 4.5 4.5 7.5l3 3M4.5 7.5h12.5M16.5 13.5l3 3-3 3M19.5 16.5H7"/></g>
+    </symbol>
+    <symbol id="i-send" viewBox="0 0 24 24">
+      <path d="M4.6 11.1 18.9 4.4c.8-.37 1.6.43 1.23 1.23L13.4 19.9c-.38.8-1.55.7-1.78-.16l-1.4-5.2a1 1 0 0 0-.7-.7L4.27 12.9c-.86-.23-.96-1.4-.16-1.78z" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-save" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.75 12 15.25l4.5-4.5M5 19.75h14"/></g>
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V4.75h5V7M6.5 7l.9 12.25h9.2L17.5 7"/></g>
+    </symbol>
+    <symbol id="i-leave" viewBox="0 0 24 24">
+      <g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 4.75H6.75v14.5h6.75M10.5 12h9.25M16.5 8.5 20 12l-3.5 3.5"/></g>
     </symbol>
   </svg>
 
@@ -83,8 +119,16 @@
         <div id="channelName" class="channel-name">#team</div>
         <div class="status"><i class="status-dot"></i><span id="statusText">Connecting…</span></div>
       </div>
-      <button id="shareBtn" class="icon-btn" aria-label="Invite to channel"><svg><use href="#i-share"/></svg></button>
+      <button id="menuBtn" class="icon-btn" aria-label="Channel settings" aria-haspopup="dialog"><svg><use href="#i-more"/></svg></button>
     </header>
+
+    <div class="notice-slot">
+      <div id="notice" class="notice" hidden>
+        <button id="noticeMain" class="notice-main"><i class="notice-dot"></i><span id="noticeText"></span></button>
+        <button id="noticeAct" class="notice-act"></button>
+        <button id="noticeClose" class="notice-close" aria-label="Dismiss"><svg><use href="#i-close"/></svg></button>
+      </div>
+    </div>
 
     <section class="stage">
       <div class="ptt-wrap" id="pttWrap">
@@ -104,10 +148,116 @@
       </div>
     </section>
 
+    <nav class="dock">
+      <button id="historyBtn" class="dock-btn" aria-haspopup="dialog">
+        <span class="dock-icon"><svg><use href="#i-history"/></svg><b id="historyBadge" class="badge" hidden></b></span>
+        <span class="dock-label">History</span>
+      </button>
+      <button id="cameraBtn" class="dock-btn">
+        <span class="dock-icon"><svg><use href="#i-camera"/></svg></span>
+        <span class="dock-label">Dual photo</span>
+      </button>
+    </nav>
+
     <footer class="members-bar">
-      <div id="members" class="members"></div>
+      <div id="members" class="members">
+        <button id="inviteChip" class="member invite" aria-label="Invite people">
+          <span class="avatar"><svg><use href="#i-plus"/></svg></span>
+          <span class="member-name">Invite</span>
+        </button>
+      </div>
     </footer>
   </main>
+
+  <!-- Incoming photo -->
+  <button id="photoCard" class="photo-card" hidden>
+    <img id="photoCardImg" alt="">
+    <span class="photo-card-text"><b id="photoCardName"></b><small>sent a photo · tap to view</small></span>
+  </button>
+
+  <div id="scrim" class="scrim" hidden></div>
+
+  <!-- History -->
+  <section id="historySheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="historyTitle" hidden>
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <header class="sheet-head">
+      <h2 id="historyTitle">History</h2>
+      <button id="playMissedBtn" class="chip-btn" hidden><svg><use href="#i-play"/></svg><span></span></button>
+      <button class="icon-btn sm" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div id="historyList" class="sheet-body history-list"></div>
+    <p class="sheet-foot">Voice messages and photos from the last 24 hours, including ones you missed. Kept on this device for 7 days.</p>
+  </section>
+
+  <!-- Settings -->
+  <section id="menuSheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="menuTitle" hidden>
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <header class="sheet-head">
+      <h2 id="menuTitle">#team</h2>
+      <button class="icon-btn sm" data-close aria-label="Close"><svg><use href="#i-close"/></svg></button>
+    </header>
+    <div class="sheet-body menu">
+      <button id="inviteRow" class="row">
+        <span class="row-icon"><svg><use href="#i-share"/></svg></span>
+        <span class="row-text"><span>Invite people</span><small>Share a link that opens this channel</small></span>
+      </button>
+      <label class="row" id="alertsRow">
+        <span class="row-icon"><svg><use href="#i-bell"/></svg></span>
+        <span class="row-text"><span>Background alerts</span><small id="alertsSub">Get notified when walki is closed</small></span>
+        <span class="switch"><input id="alertsToggle" type="checkbox" role="switch"><i></i></span>
+      </label>
+      <label class="row">
+        <span class="row-icon"><svg><use href="#i-sun"/></svg></span>
+        <span class="row-text"><span>Keep screen on</span><small>Hear messages live without alerts. Uses more battery</small></span>
+        <span class="switch"><input id="awakeToggle" type="checkbox" role="switch"><i></i></span>
+      </label>
+      <button id="installRow" class="row" hidden>
+        <span class="row-icon"><svg><use href="#i-save"/></svg></span>
+        <span class="row-text"><span>Install walki</span><small id="installSub">Opens like an app, with alerts</small></span>
+      </button>
+      <button id="clearRow" class="row">
+        <span class="row-icon"><svg><use href="#i-trash"/></svg></span>
+        <span class="row-text"><span>Clear history</span><small id="storageSub">Removes saved messages from this device</small></span>
+      </button>
+      <button id="leaveRow" class="row danger">
+        <span class="row-icon"><svg><use href="#i-leave"/></svg></span>
+        <span class="row-text"><span>Leave channel</span><small>Stops alerts for this channel</small></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- Dual camera -->
+  <section id="camera" class="camera" data-mode="loading" aria-label="Dual photo" hidden>
+    <video id="camMain" class="cam-main" playsinline muted autoplay></video>
+    <canvas id="camFrozen" class="cam-main" hidden></canvas>
+    <div class="cam-inset"><video id="camInset" playsinline muted autoplay></video></div>
+    <img id="camShot" class="cam-shot" alt="Your photo">
+    <div id="camFlash" class="cam-flash"></div>
+    <div id="camHint" class="cam-hint"></div>
+    <span class="cam-spinner spinner" aria-hidden="true"></span>
+    <header class="cam-top">
+      <button id="camClose" class="cam-icon" aria-label="Close camera"><svg><use href="#i-close"/></svg></button>
+      <span class="cam-title">Dual photo</span>
+      <button id="camSwap" class="cam-icon" aria-label="Swap cameras"><svg><use href="#i-swap"/></svg></button>
+    </header>
+    <footer class="cam-bottom">
+      <button id="camShutter" class="cam-shutter" aria-label="Take photo"></button>
+      <div class="cam-review">
+        <button id="camRetake" class="cam-pill">Retake</button>
+        <button id="camSend" class="cam-pill primary">Send<svg><use href="#i-send"/></svg></button>
+      </div>
+    </footer>
+  </section>
+
+  <!-- Photo viewer -->
+  <section id="viewer" class="viewer" role="dialog" aria-modal="true" aria-label="Photo" hidden>
+    <img id="viewerImg" alt="">
+    <header class="viewer-top">
+      <button id="viewerClose" class="cam-icon" aria-label="Close"><svg><use href="#i-close"/></svg></button>
+      <div class="viewer-meta"><b id="viewerName"></b><span id="viewerTime"></span></div>
+      <button id="viewerSave" class="cam-icon" aria-label="Save photo"><svg><use href="#i-save"/></svg></button>
+    </header>
+  </section>
 
   <div id="toast" class="toast" role="status"></div>
   <label id="haptic" class="haptic" aria-hidden="true"><input type="checkbox" switch tabindex="-1"></label>

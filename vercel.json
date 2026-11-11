@@ -1,7 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "echo 'no dependencies needed'",
   "buildCommand": "echo 'static app, nothing to build'",
   "outputDirectory": "public",
   "regions": ["fra1"],
@@ -12,13 +11,18 @@
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "Permissions-Policy", "value": "microphone=(self)" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" }
+        { "key": "Permissions-Policy", "value": "microphone=(self), camera=(self)" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "same-origin" }
       ]
     },
     {
-      "source": "/(sw.js|app.js|recorder.js|styles.css|manifest.webmanifest)",
+      "source": "/(sw.js|app.js|camera.js|recorder.js|styles.css|manifest.webmanifest)",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+    },
+    {
+      "source": "/icons/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }]
     }
   ]
 }

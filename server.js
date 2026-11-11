@@ -21,6 +21,7 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
   '.json': 'application/json',
   '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
 };
 
 function serve(req, res) {
@@ -49,7 +50,7 @@ function serve(req, res) {
       'content-type': MIME[ext] || 'application/octet-stream',
       'cache-control': 'no-cache',
       'x-content-type-options': 'nosniff',
-      'permissions-policy': 'microphone=(self)',
+      'permissions-policy': 'microphone=(self), camera=(self)',
     });
     fs.createReadStream(target).pipe(res);
   });
